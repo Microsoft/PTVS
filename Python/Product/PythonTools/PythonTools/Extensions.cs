@@ -746,14 +746,12 @@ namespace Microsoft.PythonTools {
             if (debugger == null) {
                 return;
             }
-            AD7Engine engine = AD7Engine.GetEngineForProcess(debugger.CurrentProcess);
-            if (engine != null) {
-                await engine.RefreshThreadFrames(debugger.CurrentThread.ID, ct);
-                var vsDebugger = serviceProvider.GetShellDebugger() as IDebugRefreshNotification140;
-                if (vsDebugger != null) {
-                    // Passing fCallstackFormattingAffected = TRUE to OnExpressionEvaluationRefreshRequested to force refresh
-                    vsDebugger.OnExpressionEvaluationRefreshRequested(1);
-                }
+
+            // TODO: Debug Repl - this is only necessary for the debug repl. Once it goes away, remove this function.
+            var vsDebugger = serviceProvider.GetShellDebugger() as IDebugRefreshNotification140;
+            if (vsDebugger != null) {
+                // Passing fCallstackFormattingAffected = TRUE to OnExpressionEvaluationRefreshRequested to force refresh
+                vsDebugger.OnExpressionEvaluationRefreshRequested(1);
             }
         }
 

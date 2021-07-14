@@ -24,7 +24,6 @@ using System.Windows.Forms;
 using Microsoft.PythonTools.Infrastructure;
 using Microsoft.PythonTools.Ipc.Json;
 using Microsoft.VisualStudio.Debugger.Interop;
-using LDP = Microsoft.PythonTools.Debugger.LegacyDebuggerProtocol;
 
 namespace Microsoft.PythonTools.Debugger.Remote {
     internal class PythonRemoteDebugProcess : IDebugProcess2, IDebugProcessSecurity2 {
@@ -156,82 +155,6 @@ namespace Microsoft.PythonTools.Debugger.Remote {
 
         private string Title {
             get { return _version; }
-        }
-
-        public static async Task<PythonRemoteDebugProcess> ConnectAsync(PythonRemoteDebugPort port, TextWriter debugLog, CancellationToken ct) {
-            PythonRemoteDebugProcess process = null;
-
-            // Connect to the remote debugging server and obtain process information. If any errors occur, display an error dialog, and keep
-            // trying for as long as user clicks "Retry".
-            while (true) {
-                DebugConnection debugConn = null;
-                ConnectionException connEx = null;
-                try {
-                    // Process information is not sensitive, so ignore any SSL certificate errors, rather than bugging the user with warning dialogs.
-                    debugConn = await PythonRemoteProcess.ConnectAsync(port.Uri, false, debugLog, ct);
-                } catch (ConnectionException ex) {
-                    connEx = ex;
-                }
-
-                using (debugConn) {
-                    if (debugConn != null) {
-                        try {
-                            var response = await debugConn.SendRequestAsync(new LDP.RemoteDebuggerInfoRequest(), ct);
-                            process = new PythonRemoteDebugProcess(port, response.processId, response.executable, response.user, response.pythonVersion);
-                            break;
-                        } catch (IOException ex) {
-                            connEx = new ConnectionException(ConnErrorMessages.RemoteNetworkError, ex);
-                        } catch (FailedRequestException ex) {
-                            connEx = new ConnectionException(ConnErrorMessages.RemoteNetworkError, ex);
-                        }
-                    }
-
-                    if (connEx != null) {
-                        string errText;
-                        switch (connEx.Error) {
-                            case ConnErrorMessages.RemoteUnsupportedServer:
-                                errText = Strings.RemoteUnsupportedServer_Host.FormatUI(port.Uri);
-                                break;
-                            case ConnErrorMessages.RemoteSecretMismatch:
-                                errText = Strings.RemoteSecretMismatch_Host.FormatUI(new UriBuilder(port.Uri) { UserName = null, Password = null }.Uri);
-                                break;
-                            case ConnErrorMessages.RemoteSslError:
-                                // User has already got a warning dialog and clicked "Cancel" on that, so no further prompts are needed.
-                                return null;
-                            default:
-                                {
-                                    // Azure uses HTTP 503 (Service Unavailable) to indicate that websocket connections are not supported. Show a special error message for that.
-                                    var wsEx = connEx.InnerException as WebSocketException;
-                                    if (wsEx != null) {
-                                        var webEx = wsEx.InnerException as WebException;
-                                        if (webEx != null) {
-                                            var httpResponse = webEx.Response as HttpWebResponse;
-                                            if (httpResponse != null && httpResponse.StatusCode == HttpStatusCode.ServiceUnavailable) {
-                                                errText = Strings.RemoteAzureServiceUnavailable_Host.FormatUI(port.Uri);
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    errText = Strings.RemoteServiceUnavailable_Host.FormatUI(port.Uri);
-                                    for (var ex = connEx.InnerException; ex != null; ex = ex.InnerException) {
-                                        if (ex.InnerException == null) {
-                                            errText += "\r\n\r\n{0}\r\n{1}".FormatUI(Strings.AdditionalInformation, ex.Message);
-                                        }
-                                    }
-                                    break;
-                                }
-                        }
-
-                        DialogResult dlgRes = MessageBox.Show(errText, Strings.ProductTitle, MessageBoxButtons.RetryCancel, MessageBoxIcon.Error);
-                        if (dlgRes != DialogResult.Retry) {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            return process;
         }
     }
 }

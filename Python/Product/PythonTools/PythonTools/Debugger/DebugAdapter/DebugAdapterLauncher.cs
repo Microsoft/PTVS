@@ -24,6 +24,7 @@ using System.Web;
 using System.Windows.Forms;
 using Microsoft.PythonTools.Infrastructure;
 using Microsoft.VisualStudio.Debugger.DebugAdapterHost.Interfaces;
+using Microsoft.VisualStudio.Debugger.Interop;
 using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -46,27 +47,31 @@ namespace Microsoft.PythonTools.Debugger {
 
         public ITargetHostProcess LaunchAdapter(IAdapterLaunchInfo launchInfo, ITargetHostInterop targetInterop) {
             if (launchInfo.LaunchType == LaunchType.Attach) {
-                var debugAttachInfo = (DebugAttachInfo)_debugInfo;
-                return DebugAdapterRemoteProcess.Attach(debugAttachInfo);
+                return LaunchAdapterForAttach(launchInfo, targetInterop);
             }
 
-            var debugLaunchInfo = (DebugLaunchInfo)_debugInfo;
-            var debugPyAdapterDirectory = Path.GetDirectoryName(PythonToolsInstallPath.GetFile("debugpy\\adapter\\__init__.py"));
-            var targetProcess = new DebugAdapterProcess(_adapterHostContext, targetInterop, debugPyAdapterDirectory);
-
-            return targetProcess.StartProcess(debugLaunchInfo.InterpreterPathAndArguments.FirstOrDefault(), debugLaunchInfo.LaunchWebPageUrl);
+            return LaunchAdapterForLaunch(launchInfo, targetInterop);
         }
 
         public void UpdateLaunchOptions(IAdapterLaunchInfo adapterLaunchInfo) {
             _debugInfo = adapterLaunchInfo.LaunchType == LaunchType.Launch
                 ? GetLaunchDebugInfo(adapterLaunchInfo.LaunchJson)
-                : (DebugInfo)GetTcpAttachDebugInfo(adapterLaunchInfo);
+                : (DebugInfo)GetAttachDebugInfo(adapterLaunchInfo);
 
             AddDebuggerOptions(adapterLaunchInfo, _debugInfo);
             adapterLaunchInfo.LaunchJson = _debugInfo.GetJsonString();
         }
 
         #region Launch
+
+        private ITargetHostProcess LaunchAdapterForLaunch(IAdapterLaunchInfo launchInfo, ITargetHostInterop targetInterop) {
+            var debugLaunchInfo = (DebugLaunchInfo)_debugInfo;
+            var debugPyAdapterDirectory = Path.GetDirectoryName(PythonToolsInstallPath.GetFile("debugpy\\adapter\\__init__.py"));
+            var targetProcess = new DebugAdapterProcess(_adapterHostContext, targetInterop, debugPyAdapterDirectory);
+
+            return targetProcess.StartProcess(debugLaunchInfo.InterpreterPathAndArguments.FirstOrDefault(), debugLaunchInfo.LaunchWebPageUrl, null);
+        }
+
         private static DebugLaunchInfo GetLaunchDebugInfo(string adapterLaunchJson) {
             var adapterLaunchInfoJson = JObject.Parse(adapterLaunchJson);
             adapterLaunchInfoJson = adapterLaunchInfoJson.Value<JObject>("ConfigurationProperties") ?? adapterLaunchInfoJson;//Based on the VS version, the JSON could be nested in ConfigurationProperties
@@ -164,16 +169,32 @@ namespace Microsoft.PythonTools.Debugger {
         #endregion
 
         #region Attach
-        private static DebugAttachInfo GetTcpAttachDebugInfo(IAdapterLaunchInfo adapterLaunchInfo) {
+
+        private ITargetHostProcess LaunchAdapterForAttach(IAdapterLaunchInfo launchInfo, ITargetHostInterop targetInterop) {
+            var debugAttachInfo = (DebugAttachInfo)_debugInfo;
+            if (launchInfo.LaunchLocation == LaunchLocation.Remote) {
+                // This is a remote attach scenario
+                return DebugAdapterAttachProcess.RemoteAttach(debugAttachInfo);
+            } else {
+                // This is a local attach scenario
+                return DebugAdapterAttachProcess.LocalAttach(debugAttachInfo, launchInfo, targetInterop);
+            }
+        }
+
+        private static DebugAttachInfo GetAttachDebugInfo(IAdapterLaunchInfo adapterLaunchInfo) {
             var debugAttachInfo = new DebugAttachInfo();
-
             adapterLaunchInfo.DebugPort.GetPortName(out var adapterHostPortInfo);
-            debugAttachInfo.RemoteUri = new Uri(adapterHostPortInfo);
 
-            var uriInfo = new Uri(adapterHostPortInfo);
-            debugAttachInfo.Host = uriInfo.Host;
-            debugAttachInfo.Port = uriInfo.Port;
+            // If this is a remote URI, pull out the host and port.
+            if (adapterHostPortInfo != null && adapterHostPortInfo.Contains(":")) {
+                debugAttachInfo.RemoteUri = new Uri(adapterHostPortInfo);
 
+                var uriInfo = new Uri(adapterHostPortInfo);
+                debugAttachInfo.Host = uriInfo.Host;
+                debugAttachInfo.Port = uriInfo.Port;
+            } else {
+                debugAttachInfo.Host = adapterHostPortInfo;
+            }
             return debugAttachInfo;
         }
 

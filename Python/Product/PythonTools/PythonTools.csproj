@@ -132,6 +132,7 @@
     <Reference Include="Microsoft.VisualStudio.Debugger.Interop.10.0" />
     <Reference Include="Microsoft.VisualStudio.Debugger.Interop.11.0" />
     <Reference Include="Microsoft.VisualStudio.Debugger.Interop.14.0" />
+    <Reference Include="Microsoft.VisualStudio.Debugger.Interop.15.0" />
     <Reference Include="Microsoft.VisualStudio.Debugger.InteropA" />
     <Reference Include="Microsoft.VisualStudio.Debugger.DebugAdapterHost.Interfaces, Version=1.5.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
     <Reference Include="Microsoft.VisualStudio.Shared.VSCodeDebugProtocol" />
@@ -240,6 +241,12 @@
     <Compile Include="Attributes\ProvideNewFileTemplatesAttribute.cs" />
     <Compile Include="Attributes\RegistrationAttributeBuilder.cs" />
     <Compile Include="Attributes\RegistrationAttributeBuilder.RegKey.cs" />
+    <Compile Include="PythonTools\Debugger\DebugAdapter\DebugAdapterAttachProcess.cs" />
+    <Compile Include="PythonTools\Debugger\DebugAdapter\DebugAdapterAttachProcessStream.cs" />
+    <Compile Include="PythonTools\Debugger\DebugAdapter\DebugAdapterLaunchProcess.cs" />
+    <Compile Include="PythonTools\Debugger\DebugAdapter\ProcessExtensions.cs" />
+    <Compile Include="PythonTools\Debugger\DebuggerHelper.cs" />
+    <Compile Include="PythonTools\Debugger\IDebugUnixShellPort.cs" />
     <Compile Include="PythonTools\Editor\BraceCompletion\BraceCompletionContext.cs" />
     <Compile Include="PythonTools\Editor\BraceCompletion\BraceCompletionContextProvider.cs" />
     <Compile Include="PythonTools\Editor\Formatting\PythonFormatterAutopep8.cs" />
@@ -259,9 +266,6 @@
     <Compile Include="PythonTools\Editor\Indent\SmartIndent.cs" />
     <Compile Include="PythonTools\Debugger\CustomDebugAdapterProtocolExtension.cs" />
     <Compile Include="PythonTools\Debugger\DebugAdapter\DebugAdapterLauncher.cs" />
-    <Compile Include="PythonTools\Debugger\DebugAdapter\DebugAdapterProcess.cs" />
-    <Compile Include="PythonTools\Debugger\DebugAdapter\DebugAdapterRemoteProcess.cs" />
-    <Compile Include="PythonTools\Debugger\DebugAdapter\DebugAdapterRemoteProcessStream.cs" />
     <Compile Include="PythonTools\Debugger\DebugAdapter\DebugInfo.cs" />
     <Compile Include="PythonTools\Debugger\DebugPyVersionHelper.cs" />
     <Compile Include="PythonTools\Commands\CurrentEnvironmentListCommand.cs" />

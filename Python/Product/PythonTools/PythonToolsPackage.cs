@@ -469,6 +469,9 @@ namespace Microsoft.PythonTools {
             // test discoverer and test executor to connect back to VS.
             Environment.SetEnvironmentVariable("_PTVS_PID", Process.GetCurrentProcess().Id.ToString());
 
+            // Setup the debug watcher so we can query for IDebug types
+            var x = DebuggerHelper.Instance;
+
             Trace.WriteLine("Leaving Initialize() of: {0}".FormatUI(this));
         }
 

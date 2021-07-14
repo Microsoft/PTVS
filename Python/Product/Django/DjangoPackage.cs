@@ -89,34 +89,6 @@ namespace Microsoft.PythonTools.Django {
             ((IServiceContainer)this).AddService(langService.GetType(), langService, true);
 
             RegisterProjectFactory(new DjangoProjectFactory(this));
-
-            // Add our command handlers for menu (commands must exist in the .vsct file)
-            OleMenuCommandService mcs = GetService(typeof(IMenuCommandService)) as OleMenuCommandService;
-            if (null != mcs) {
-                // Create the command for the menu item.
-                CommandID menuCommandID = new CommandID(GuidList.guidDjangoCmdSet, (int)PkgCmdIDList.cmdidGotoTemplateSource);
-                MenuCommand menuItem = new MenuCommand(GotoTemplateSourceCode, menuCommandID);
-                mcs.AddCommand(menuItem);
-            }
-        }
-
-        private void GotoTemplateSourceCode(object sender, EventArgs args) {
-            var dte = (EnvDTE.DTE)GetService(typeof(EnvDTE.DTE));
-
-            var curFrame = (StackFrame2)dte.Debugger.CurrentStackFrame;
-            
-            var frameId = curFrame.Depth;
-            var thread = curFrame.Parent;
-            var threadId = thread.ID;
-            var process = thread.Program;
-            var processId = process.Process.ProcessID;
-
-            var mappingDoc = AD7Engine.GetCodeMappingDocument(processId, threadId, (int)(frameId - 1));
-            if(mappingDoc != null) {
-                var debugger = (IVsDebugger2)GetService(typeof(IVsDebugger));
-                IVsTextView view;
-                ErrorHandler.ThrowOnFailure(debugger.ShowSource(mappingDoc, 1, 1, 1, 0, out view));
-            }
         }
 
         #endregion

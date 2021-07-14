@@ -18,16 +18,14 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Python.Parsing;
 using Microsoft.PythonTools.Debugger;
-using Microsoft.PythonTools.Debugger.Remote;
 using Microsoft.PythonTools.Infrastructure;
 using Microsoft.PythonTools.Intellisense;
-using Microsoft.PythonTools.Interpreter;
+using Microsoft.VisualStudio.Debugger.Interop;
 using Microsoft.VisualStudio.InteractiveWindow;
 using Microsoft.VisualStudio.InteractiveWindow.Commands;
 using Microsoft.VisualStudio.Utilities;
@@ -38,17 +36,15 @@ namespace Microsoft.PythonTools.Repl {
     [ContentType(PythonCoreConstants.ContentType)]
     [ContentType(PredefinedInteractiveCommandsContentTypes.InteractiveCommandContentTypeName)]
     internal class PythonDebugProcessReplEvaluator : PythonInteractiveEvaluator {
-        private readonly PythonProcess _process;
-        private readonly IThreadIdMapper _threadIdMapper;
-        private long _threadId;
-        private int _frameId;
-        private PythonLanguageVersion _languageVersion;
+        private uint _threadId;
         private Dictionary<string, string> _moduleToFileName;
         private string _currentScopeName;
         private string _currentScopeFileName;
 
         private string _currentFrameFilename;
-        private CompletionResult[] _currentFrameLocals;
+        private int _currentProcessId;
+        private IDebugProcess2 _currentProcess;
+        private const int ExpressionEvaluationTimeout = 3000; // ms
 
         /// <summary>
         /// Backwards compatible and non-localized name for the scope
@@ -56,14 +52,12 @@ namespace Microsoft.PythonTools.Repl {
         /// </summary>
         private const string CurrentFrameScopeFixedName = "<CurrentFrame>";
 
-        public PythonDebugProcessReplEvaluator(IServiceProvider serviceProvider, PythonProcess process, IThreadIdMapper threadIdMapper)
+        public PythonDebugProcessReplEvaluator(IServiceProvider serviceProvider, IDebugProcess2 process, int pid)
             : base(serviceProvider) {
-            _process = process;
-            _threadIdMapper = threadIdMapper;
-            _threadId = process.GetThreads()[0].Id;
-            _languageVersion = process.LanguageVersion;
             _currentScopeName = CurrentFrameScopeFixedName;
             DisplayName = Strings.DebugReplDisplayName;
+            _currentProcessId = pid;
+            _currentProcess = process;
         }
 
         public override async Task<ExecutionResult> InitializeAsync() {
@@ -74,44 +68,20 @@ namespace Microsoft.PythonTools.Repl {
 
             result = await _serviceProvider.GetUIThread().InvokeTask(async () => {
                 UpdatePropertiesFromProjectMoniker();
-
-                var remoteProcess = _process as PythonRemoteProcess;
-
+                var isRemote = DebuggerHelper.IsRemote(_currentProcess);
                 try {
                     _serviceProvider.GetPythonToolsService().Logger?.LogEvent(Logging.PythonLogEvent.DebugRepl, new Logging.DebugReplInfo {
-                        RemoteProcess = remoteProcess != null,
-                        Version = _process.LanguageVersion.ToVersion().ToString()
+                        RemoteProcess = isRemote,
+                        Version = "unknown"
                     });
                 } catch (Exception ex) {
                     Debug.Fail(ex.ToUnhandledExceptionMessage(GetType()));
-                }
+                } 
 
-                _process.ModulesChanged += OnModulesChanged;
+                DebuggerHelper.Instance.ModulesChanged += OnModulesChanged;
 
-                var threads = _process.GetThreads();
-                PythonThread activeThread = null;
-
-                var dte = _serviceProvider.GetDTE();
-                if (dte != null) {
-                    // If we are broken into the debugger, let's set the debug REPL active thread
-                    // to be the one that is active in the debugger
-                    var dteDebugger = dte.Debugger;
-                    if (dteDebugger.CurrentMode == EnvDTE.dbgDebugMode.dbgBreakMode &&
-                        dteDebugger.CurrentProcess != null &&
-                        dteDebugger.CurrentThread != null) {
-                        if (_process.Id == dteDebugger.CurrentProcess.ProcessID) {
-                            var activeThreadId = _threadIdMapper.GetPythonThreadId((uint)dteDebugger.CurrentThread.ID);
-                            activeThread = threads.SingleOrDefault(t => t.Id == activeThreadId);
-                        }
-                    }
-                }
-
-                if (activeThread == null) {
-                    activeThread = threads.Count > 0 ? threads[0] : null;
-                }
-
-                if (activeThread != null) {
-                    SwitchThread(activeThread, false);
+                if (DebuggerHelper.Instance.CurrentThread != null) {
+                    SwitchThread(DebuggerHelper.Instance.CurrentThread, false);
                 }
 
                 return ExecutionResult.Success;
@@ -130,7 +100,7 @@ namespace Microsoft.PythonTools.Repl {
         }
 
         internal async Task<KeyValuePair<string, string>[]> RefreshAvailableScopes() {
-            var modules = await _process.GetModuleNamesAndPaths();
+            var modules = DebuggerHelper.Instance.GetModuleNamesAndPaths();
 
             var moduleToFile = new Dictionary<string, string>();
             foreach (var item in modules) {
@@ -156,66 +126,27 @@ namespace Microsoft.PythonTools.Repl {
             var ct = new CancellationToken();
             var cancellationRegistration = ct.Register(() => tcs.TrySetCanceled());
 
-            EventHandler<ProcessExitedEventArgs> processExited = delegate {
+            EventHandler processExited = delegate {
                 tcs.TrySetCanceled();
             };
 
-            EventHandler<OutputEventArgs> debuggerOutput = (object sender, OutputEventArgs e) => {
-                switch (e.Channel) {
-                    case OutputChannel.StdOut:
-                        WriteOutput(e.Output, addNewline: false);
-                        break;
-                    case OutputChannel.StdErr:
-                        WriteError(e.Output, addNewline: false);
-                        break;
-                }
-            };
-
-            Action<PythonEvaluationResult> resultReceived = (PythonEvaluationResult result) => {
-                if (!string.IsNullOrEmpty(result.ExceptionText)) {
-                    tcs.TrySetResult(ExecutionResult.Failure);
-                } else {
-                    tcs.TrySetResult(ExecutionResult.Success);
-                }
-            };
-
-            _process.ProcessExited += processExited;
-            _process.DebuggerOutput += debuggerOutput;
+            DebuggerHelper.Instance.ProcessExited += processExited;
             try {
-                if (_currentScopeName == CurrentFrameScopeFixedName) {
-                    var frame = GetFrames().SingleOrDefault(f => f.FrameId == _frameId);
-                    if (frame != null) {
-                        await _process.ExecuteTextAsync(text, PythonEvaluationResultReprKind.Normal, frame, true, resultReceived, ct);
-                    } else {
-                        WriteError(Strings.DebugReplCannotRetrieveFrameError);
-                        tcs.TrySetResult(ExecutionResult.Failure);
-                    }
-                } else {
-                    await _process.ExecuteTextAsync(text, PythonEvaluationResultReprKind.Normal, _currentScopeName, true, resultReceived, ct);
-                }
-
+                var result = await DebuggerHelper.Instance.EvaluateText(text, ExpressionEvaluationTimeout);
+                tcs.TrySetResult(result.Item1);
                 return await tcs.Task;
             } finally {
-                _process.ProcessExited -= processExited;
-                _process.DebuggerOutput -= debuggerOutput;
+                DebuggerHelper.Instance.ProcessExited -= processExited;
                 cancellationRegistration.Dispose();
             }
         }
 
-        public PythonProcess Process {
-            get { return _process; }
-        }
-
         public int ProcessId {
-            get { return _process.Id; }
+            get { return _currentProcessId; }
         }
 
         public long ThreadId {
             get { return _threadId; }
-        }
-
-        public int FrameId {
-            get { return _frameId; }
         }
 
         public override string CurrentScopeName {
@@ -248,14 +179,6 @@ namespace Microsoft.PythonTools.Repl {
             return Enumerable.Empty<KeyValuePair<string, string>>();
         }
 
-        public override async Task<CompletionResult[]> GetMemberNamesAsync(string text, CancellationToken ct) {
-            if (_currentScopeName == CurrentFrameScopeFixedName && string.IsNullOrEmpty(text) && _currentFrameLocals != null) {
-                return _currentFrameLocals.ToArray();
-            };
-
-            return await GetMemberNamesInternalAsync(text, ct);
-        }
-
         public override Task<OverloadDoc[]> GetSignatureDocumentationAsync(string text, CancellationToken ct) {
             // TODO: implement this
             return Task.FromResult(new OverloadDoc[0]);
@@ -265,31 +188,17 @@ namespace Microsoft.PythonTools.Repl {
             // TODO: implement support for getting members for module scope,
             // not just for current frame scope
             if (_currentScopeName == CurrentFrameScopeFixedName) {
-                var frame = GetFrames().SingleOrDefault(f => f.FrameId == _frameId);
-                if (frame != null) {
-                    using (var completion = new AutoResetEvent(false)) {
-                        PythonEvaluationResult result = null;
+                var expression = string.Format(CultureInfo.InvariantCulture, "':'.join(dir({0}))", text ?? "");
+                var result = await DebuggerHelper.Instance.EvaluateText(expression, ExpressionEvaluationTimeout);
+                if (result.Item1.IsSuccessful) {
+                    // We don't really know if it's a field, function or else...
+                    var completionResults = result.Item2
+                        .Split(':')
+                        .Where(r => !string.IsNullOrEmpty(r))
+                        .Select(r => new CompletionResult(r, PythonMemberType.Generic))
+                        .ToArray();
 
-                        var expression = string.Format(CultureInfo.InvariantCulture, "':'.join(dir({0}))", text ?? "");
-                        _serviceProvider.GetUIThread().InvokeTaskSync(() => frame.ExecuteTextAsync(expression, PythonEvaluationResultReprKind.Raw, (obj) => {
-                            result = obj;
-                            try {
-                                completion.Set();
-                            } catch (ObjectDisposedException) {
-                            }
-                        }, CancellationToken.None), CancellationToken.None);
-
-                        if (completion.WaitOne(100) && !_process.HasExited && result?.StringRepr != null) {
-                            // We don't really know if it's a field, function or else...
-                            var completionResults = result.StringRepr
-                                .Split(':')
-                                .Where(r => !string.IsNullOrEmpty(r))
-                                .Select(r => new CompletionResult(r, PythonMemberType.Generic))
-                                .ToArray();
-
-                            return completionResults;
-                        }
-                    }
+                    return completionResults;
                 }
             }
 
@@ -314,62 +223,65 @@ namespace Microsoft.PythonTools.Repl {
                 WriteOutput(CurrentScopeName);
             }
         }
-
-        internal IList<PythonThread> GetThreads() {
-            return _process.GetThreads();
+        internal void SwitchThread(long threadId, bool verbose) {
+            _currentProcess.EnumThreads(out var ppThreads);
+            using (var disposer = new ComDisposer(ppThreads)) {
+                ppThreads.GetCount(out var count);
+                IDebugThread2[] pThreads = new IDebugThread2[count];
+                ppThreads.Next(count, pThreads, ref count);
+                disposer.AddRange(pThreads);
+                foreach (var pThread in pThreads) {
+                    pThread.GetThreadId(out var pThreadId);
+                    if (pThreadId == (uint)threadId) {
+                        SwitchThread(pThread, verbose);
+                        break;
+                    }
+                }
+            }
         }
-
-        internal IList<PythonStackFrame> GetFrames() {
-            var activeThread = _process.GetThreads().SingleOrDefault(t => t.Id == _threadId);
-            return activeThread != null ? activeThread.Frames : new List<PythonStackFrame>();
-        }
-
-        internal void SwitchThread(PythonThread thread, bool verbose) {
-            var frame = thread.Frames.FirstOrDefault();
+        
+        internal void SwitchThread(IDebugThread2 thread, bool verbose) {
+            var frame = DebuggerHelper.GetTopmostFrame(thread);
             if (frame == null) {
-                WriteError(Strings.DebugReplCannotChangeCurrentThreadNoFrame.FormatUI(thread.Id));
+                WriteError(Strings.DebugReplCannotChangeCurrentThreadNoFrame.FormatUI(0));
                 return;
             }
-
-            _threadId = thread.Id;
-            _frameId = frame.FrameId;
+            thread.GetThreadId(out _threadId);
+            frame.GetDebugProperty(out var property);
+            using (var disposer = new ComDisposer(property)) {
+                DEBUG_PROPERTY_INFO[] propInfoArray = new DEBUG_PROPERTY_INFO[1];
+                property.GetPropertyInfo(enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_FULLNAME, 10, 100, null, 0, propInfoArray);
+                if (_currentFrameFilename != propInfoArray[0].bstrFullName) {
+                    _currentFrameFilename = propInfoArray[0].bstrFullName;
+                }
+            }
             _currentScopeName = CurrentFrameScopeFixedName;
             _currentScopeFileName = null;
-            if (_currentFrameFilename != frame.FileName) {
-                _currentFrameFilename = frame.FileName;
-            }
-            UpdateFrameLocals(frame);
             if (verbose) {
-                WriteOutput(Strings.DebugReplThreadChanged.FormatUI(_threadId, _frameId));
+                WriteOutput(Strings.DebugReplThreadChanged.FormatUI(_threadId, 0));
             }
-        }
-
-        internal void SwitchFrame(PythonStackFrame frame) {
-            _frameId = frame.FrameId;
-            _currentScopeName = CurrentFrameScopeFixedName;
-            _currentScopeFileName = null;
-            UpdateFrameLocals(frame);
-            WriteOutput(Strings.DebugReplFrameChanged.FormatUI(frame.FrameId));
         }
 
         internal void FrameUp() {
-            var frames = GetFrames();
-            var currentFrame = frames.SingleOrDefault(f => f.FrameId == _frameId);
-            if (currentFrame != null) {
-                int index = frames.IndexOf(currentFrame);
-                if (index < (frames.Count - 1)) {
-                    SwitchFrame(frames[index + 1]);
+            var dteDebugger = _serviceProvider.GetDTE().Debugger;
+            var frames = dteDebugger.CurrentThread.StackFrames;
+            var currentFrame = dteDebugger.CurrentStackFrame;
+            for (int i=0; i<frames.Count; i++) {
+                if (frames.Item(i) == currentFrame && i < frames.Count - 1) {
+                    dteDebugger.CurrentStackFrame = frames.Item(i + 1);
+                    break;
                 }
             }
         }
 
         internal void FrameDown() {
-            var frames = GetFrames();
-            var currentFrame = frames.SingleOrDefault(f => f.FrameId == _frameId);
-            if (currentFrame != null) {
-                int index = frames.IndexOf(currentFrame);
-                if (index > 0) {
-                    SwitchFrame(frames[index - 1]);
+            var dteDebugger = _serviceProvider.GetDTE().Debugger;
+            var frames = dteDebugger.CurrentThread.StackFrames;
+            var currentFrame = dteDebugger.CurrentStackFrame;
+            for (int i = 0; i < frames.Count; i++) {
+                if (frames.Item(i) == currentFrame && i > 0) {
+                    dteDebugger.CurrentStackFrame = frames.Item(i - 1);
+                    break;
                 }
             }
         }
@@ -394,17 +306,10 @@ namespace Microsoft.PythonTools.Repl {
             _serviceProvider.GetDTE().Debugger.CurrentThread.Parent.Go();
         }
 
-        private void UpdateFrameLocals(PythonStackFrame frame) {
-            _currentFrameLocals = frame.Locals.Union(frame.Parameters)
-                .Where(r => !string.IsNullOrEmpty(r.Expression))
-                .Select(r => new CompletionResult(r.Expression, PythonMemberType.Generic))
-                .ToArray();
-        }
-
         private void UpdateDTEDebuggerProcessAndThread() {
             EnvDTE.Process dteActiveProcess = null;
             foreach (EnvDTE.Process dteProcess in _serviceProvider.GetDTE().Debugger.DebuggedProcesses) {
-                if (dteProcess.ProcessID == _process.Id) {
+                if (dteProcess.ProcessID == _currentProcessId) {
                     dteActiveProcess = dteProcess;
                     break;
                 }
@@ -416,7 +321,7 @@ namespace Microsoft.PythonTools.Repl {
 
             EnvDTE.Thread dteActiveThread = null;
             foreach (EnvDTE.Thread dteThread in _serviceProvider.GetDTE().Debugger.CurrentProgram.Threads) {
-                if (_threadIdMapper.GetPythonThreadId((uint)dteThread.ID) == _threadId) {
+                if ((uint)dteThread.ID == _threadId) {
                     dteActiveThread = dteThread;
                     break;
                 }

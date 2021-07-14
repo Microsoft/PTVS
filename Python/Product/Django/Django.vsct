@@ -58,15 +58,6 @@
         </Strings>
       </Button>
 
-      <Button guid="guidDjangoCmdSet" id="cmdidGotoTemplateSource" priority="0x700" type="Button">
-        <Parent guid="guidVSDebugGroup" id="IDG_CALLSTACK_NAVIGATE"/>
-        <!-- <Icon guid="guidImages" id="bmpPic1"/> -->
-
-        <Strings>
-          <ButtonText>Go to template source</ButtonText>
-        </Strings>
-      </Button>
-
     </Buttons>
 
 
@@ -102,7 +93,6 @@
     <!-- This is the guid used to group the menu commands together -->
     <GuidSymbol name="guidDjangoCmdSet" value="{5b3281a5-d037-4e84-93aa-a6819304dbd9}">
       <IDSymbol name="cmdidStartApp" value ="0x1002"/>
-      <IDSymbol name="cmdidGotoTemplateSource" value="0x1003"/>
     </GuidSymbol>
 
   </Symbols>

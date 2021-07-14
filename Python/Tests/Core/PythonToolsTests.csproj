@@ -118,9 +118,6 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="..\DebuggerTests\DebugExtensions.cs">
-      <Link>DebugExtensions.cs</Link>
-    </Compile>
     <Compile Include="AssemblySetup.cs" />
     <None Include="AutoIndentTests.cs" />
     <Compile Include="PythonFormatterTests.cs" />
@@ -140,7 +137,6 @@
     <None Include="LocationTrackerTests.cs" />
     <Compile Include="PathUtilsTests.cs" />
     <Compile Include="CPythonInterpreterTests.cs" />
-    <Compile Include="DebugReplEvaluatorTests.cs" />
     <None Include="ExtractMethodTests.cs" />
     <None Include="FuzzyStringMatcherTests.cs" />
     <Compile Include="ImportWizardTests.cs" />

@@ -23,5 +23,5 @@ permissions and limitations under the License.
   </PropertyGroup>
 
   <!-- _PythonToolsPath must be provided or defined in the environment -->
-  <Import Project="$(_PythonToolsPath)\..\..\Python - Django\16.0.0\Microsoft.PythonTools.Django.targets" />
+  <Import Project="$(_PythonToolsPath)\..\..\Python - Django\$(VisualStudioVersion).0\Microsoft.PythonTools.Django.targets" />
 </Project>

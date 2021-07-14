@@ -7,10 +7,8 @@
     <ProjectFile Include="$(BuildRoot)\Common\Tests\dirs.proj"/>
     <ProjectFile Include="TestRunnerInterop\TestRunnerInterop.csproj" />
     <ProjectFile Include="CookiecutterTests\CookiecutterTests.csproj" />
-    <ProjectFile Include="DebuggerTests\DebuggerTests.csproj" />
     <ProjectFile Include="DebuggerUITests\DebuggerUITests.csproj" />
     <ProjectFile Include="DebuggerUITestsRunner\DebuggerUITestsRunner.csproj" />
-    <ProjectFile Include="DjangoTests\DjangoTests.csproj" />
     <ProjectFile Include="DjangoUITests\DjangoUITests.csproj" />
     <ProjectFile Include="DjangoUITestsRunner\DjangoUITestsRunner.csproj" />
     <ProjectFile Include="FastCgi\FastCgiTests.csproj" />

@@ -151,10 +151,12 @@ namespace Microsoft.PythonTools.Repl {
 
             // Activation will now be automatic, but we'll still need to maintain a ReplDocument
             if (evaluator != null) {
-                await PythonLanguageClient.ReadyTask;
                 var client = _serviceProvider.GetPythonToolsService().LanguageClient;
                 if (client != null) {
-                    client.AddClientContext(new PythonLanguageClientContextRepl(evaluator));
+                    // When the language client is ready, add the repl as the client context, but don't wait for it.
+                    PythonLanguageClient.ReadyTask.ContinueWith(async (t) => {
+                        client.AddClientContext(new PythonLanguageClientContextRepl(evaluator));
+                    }).DoNotWait();
                     Document = new ReplDocument(_serviceProvider, _window, client);
                     await Document.InitializeAsync();
                 }

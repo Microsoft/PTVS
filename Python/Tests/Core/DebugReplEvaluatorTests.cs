@@ -21,7 +21,6 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using DebuggerTests;
 using Microsoft.PythonTools.Debugger;
 using Microsoft.PythonTools.Infrastructure;
 using Microsoft.PythonTools.Repl;
@@ -35,7 +34,6 @@ namespace PythonToolsTests {
     public abstract class DebugReplEvaluatorTests {
         private PythonDebugReplEvaluator _evaluator;
         private MockReplWindow _window;
-        private List<PythonProcess> _processes;
 
         [ClassInitialize]
         public static void DoDeployment(TestContext context) {
@@ -61,27 +59,10 @@ namespace PythonToolsTests {
             _evaluator = new PythonDebugReplEvaluator(serviceProvider);
             _window = new MockReplWindow(_evaluator);
             _evaluator._Initialize(_window);
-            _processes = new List<PythonProcess>();
         }
 
         [TestCleanup]
         public void TestClean() {
-            foreach (var proc in _processes) {
-                try {
-                    proc.ResumeAsync(TimeoutToken()).WaitAndUnwrapExceptions();
-                } catch (Exception ex) {
-                    Console.WriteLine("Failed to continue process");
-                    Console.WriteLine(ex);
-                }
-                if (!proc.WaitForExit(5000)) {
-                    try {
-                        proc.Terminate();
-                    } catch (Exception ex) {
-                        Console.WriteLine("Failed to terminate process");
-                        Console.WriteLine(ex);
-                    }
-                }
-            }
             if (_window != null) {
                 Console.WriteLine("Stdout:");
                 Console.Write(_window.Output);
@@ -414,12 +395,6 @@ NameError: name 'does_not_exist' is not defined
             // adjust it to the correct thread where breakpoint was hit.
             if (threadAtBreakpoint != null) {
                 _evaluator.ChangeActiveThread(threadAtBreakpoint.Value, false);
-            }
-        }
-
-        private class MockThreadIdMapper : IThreadIdMapper {
-            public long? GetPythonThreadId(uint vsThreadId) {
-                return vsThreadId;
             }
         }
 

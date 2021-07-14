@@ -39,14 +39,14 @@ namespace Microsoft.PythonTools.Debugger {
             _debuggerAdapterDirectory = debuggerAdapterDirectory ?? throw new ArgumentNullException(nameof(debuggerAdapterDirectory));
         }
 
-        public ITargetHostProcess StartProcess(string pythonExePath, string webBrowserUrl) {
+        public ITargetHostProcess StartProcess(string pythonExePath, string webBrowserUrl, string debugPyArguments) {
             if (string.IsNullOrEmpty(pythonExePath)) {
                 MessageBox.Show(Strings.PythonInterpreterPathNullOrEmpty, Strings.ProductTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return null;
             }
 
             _webBrowserUrl = webBrowserUrl;
-            _targetHostProcess = _targetInterop.ExecuteCommandAsync(pythonExePath, "\"" + _debuggerAdapterDirectory + "\"");
+            _targetHostProcess = _targetInterop.ExecuteCommandAsync(pythonExePath, $"\"{_debuggerAdapterDirectory}\" {debugPyArguments}");
 
             if (!string.IsNullOrEmpty(webBrowserUrl) && Uri.TryCreate(webBrowserUrl, UriKind.RelativeOrAbsolute, out _)) {
                 _adapterHostContext.Events.PreviewProtocolEvent += MonitorLaunchBrowserMessage;
